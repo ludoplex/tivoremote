@@ -410,22 +410,22 @@ def kbd_arrows(text, width):
             target_y = pos / width
             target_x = pos % width
             if target_y > current_y:
-                for i in range(target_y - current_y):
+                for _ in range(target_y - current_y):
                     irsend('DOWN')
             else:
-                for i in range(current_y - target_y):
+                for _ in range(current_y - target_y):
                     irsend('UP')
             if target_x > current_x:
-                for i in range(target_x - current_x):
+                for _ in range(target_x - current_x):
                     irsend('RIGHT')
             else:
-                for i in range(current_x - target_x):
+                for _ in range(current_x - target_x):
                     irsend('LEFT')
             irsend('SELECT')
             current_y = target_y
             current_x = target_x
         elif '0' <= ch <= '9':
-            irsend('NUM' + ch)
+            irsend(f'NUM{ch}')
         elif ch == ' ':
             irsend('FORWARD')
 
@@ -469,11 +469,10 @@ def keyboard(widget=None):
 
     if width:
         kbd_arrows(text, width)
+    elif tivo_swversions.get(tivo_name, 0.0) >= 12.0:
+        kbd_direct_new(text)
     else:
-        if tivo_swversions.get(tivo_name, 0.0) >= 12.0:
-            kbd_direct_new(text)
-        else:
-            kbd_direct(text)
+        kbd_direct(text)
 
     if use_gtk:
         key_text.set_text('')
@@ -542,7 +541,7 @@ def make_button(widget, y, x, t, val=None, cols=1, width=5, fn=None,
             button.get_child().modify_fg(norm, gdk.color_parse(COLOR[s]))
         else:
             if has_ttk:
-                button.configure(style=s + '.TButton')
+                button.configure(style=f'{s}.TButton')
             else:
                 button.config(foreground=COLOR[s])
 
@@ -627,10 +626,10 @@ def recv_bytes(sock, length):
     """ Read length bytes from the socket. """
     block = ''
     while len(block) < length:
-        add = sock.recv(length - len(block))
-        if not add:
+        if add := sock.recv(length - len(block)):
+            block += add
+        else:
             break
-        block += add
     return block
 
 def recv_packet(sock):
@@ -724,7 +723,7 @@ def find_tivos():
     # so we find them by making direct TCD connections to each TiVo.
 
     tivos = {}
-    for tcd, address in tcds.items():
+    for address in tcds.values():
         name, version = get_namever(address)
         tivos[name] = address
         tivo_swversions[name] = version
@@ -770,7 +769,7 @@ def find_tivos_zc():
     for t in tivo_names[:]:
         if t.startswith('Proxy('):
             try:
-                t = t.replace('.' + REMOTE, '')[6:-1] + '.' + REMOTE
+                t = t.replace(f'.{REMOTE}', '')[6:-1] + '.' + REMOTE
                 tivo_names.remove(t)
             except:
                 pass
@@ -778,9 +777,8 @@ def find_tivos_zc():
     # Now get the addresses -- this is the slow part
     swversion = re.compile('(\d*.\d*)').findall
     for t in tivo_names:
-        s = serv.getServiceInfo(REMOTE, t)
-        if s:
-            name = t.replace('.' + REMOTE, '')
+        if s := serv.getServiceInfo(REMOTE, t):
+            name = t.replace(f'.{REMOTE}', '')
             address = socket.inet_ntoa(s.getAddress())
             try:
                 version = float(swversion(s.getProperties()['swversion'])[0])
@@ -794,7 +792,7 @@ def find_tivos_zc():
     # For proxies with numeric names, remove the original
     for t in tivo_names:
         if t.startswith('Proxy('):
-            address = t.replace('.' + REMOTE, '')[6:-1]
+            address = t.replace(f'.{REMOTE}', '')[6:-1]
             if address in tivos_rev:
                 tivos.pop(tivos_rev[address])
 
@@ -816,16 +814,16 @@ def init_window():
             screen_height = gdk.screen_height()
     else:
         window = tkinter.Tk()
-        if 'win32' == sys.platform:
+        if sys.platform == 'win32':
             win_setup()
-        elif 'aqua' == window.tk.call('tk', 'windowingsystem'):
+        elif window.tk.call('tk', 'windowingsystem') == 'aqua':
             mac_setup()
         window.title(TITLE)
         window.protocol('WM_DELETE_WINDOW', go_away)
         if use_color and has_ttk:
             s = ttk.Style()
             for name, color in COLOR.items():
-                s.map(name + '.TButton', foreground=[('!active', color)])
+                s.map(f'{name}.TButton', foreground=[('!active', color)])
         screen_width = window.winfo_screenwidth()
         screen_height = window.winfo_screenheight()
 
@@ -952,15 +950,12 @@ def list_tivos(tivos):
 
     def set_address(window, address_box):
         global tivo_address
-        if use_gtk:
-            tivo_address = address_box.get_text()
-        else:
-            tivo_address = address_box.get()
+        tivo_address = address_box.get_text() if use_gtk else address_box.get()
         main_window_clear()
 
     def make_tivo_button(widget, window, y, name, address):
         command = lambda w=None: choose_tivo(window, name, address)
-        text = '%s: %s' % (name, address)
+        text = f'{name}: {address}'
         if use_gtk:
             button = gtk.Button(text)
             button.connect('clicked', command)
@@ -972,8 +967,7 @@ def list_tivos(tivos):
     if tivos:
         make_small_window('Choose a TiVo:')
 
-        names = list(tivos.keys())
-        names.sort()
+        names = sorted(tivos.keys())
         for i, name in enumerate(names):
             make_tivo_button(outer, window, i + 1, name, tivos[name])
         make_label('Or enter an address:', i + 2)
@@ -1009,9 +1003,7 @@ def pick_tivo():
     """
     global tivo_name, tivo_swversions
     if not tivo_address:
-        tivos = {}
-        if have_zc:
-            tivos = find_tivos_zc()
+        tivos = find_tivos_zc() if have_zc else {}
         if not tivos:
             tivos = find_tivos()
         list_tivos(tivos)
@@ -1048,7 +1040,7 @@ def main_window():
         vbox1 = gtk.VBox()
         vbox2 = gtk.VBox()
         label = gtk.Label()
-        table = [gtk.Table(homogeneous=True) for i in range(8)]
+        table = [gtk.Table(homogeneous=True) for _ in range(8)]
         outer.set_border_width(10)
         for tb in table:
             tb.set_border_width(5)
@@ -1149,10 +1141,9 @@ def main_window():
 
 def key_print(keyl):
     """ Print descriptions for a block of keyboard shortcuts. """
-    keynames = list(keyl.keys())
-    keynames.sort()
+    keynames = sorted(keyl.keys())
     for i, each in enumerate(keynames):
-        sys.stdout.write('    ' + each.ljust(16) + keyl[each].ljust(16))
+        sys.stdout.write(f'    {each.ljust(16)}{keyl[each].ljust(16)}')
         if i & 1:
             sys.stdout.write('\n')
     sys.stdout.write('\n')
@@ -1163,8 +1154,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         for opt in sys.argv[1:]:
             if opt in ('-v', '--version'):
-                print('Network Remote Control for TiVo Series 3+ %s' %
-                      __version__)
+                print(f'Network Remote Control for TiVo Series 3+ {__version__}')
                 sys.exit()
             elif opt in ('-h', '--help'):
                 print(__doc__)
@@ -1242,7 +1232,7 @@ if __name__ == '__main__':
 
     # use_gr if not -g or -p?
 
-    if use_gr == None:
+    if use_gr is None:
         use_gr = (use_gtk or sys.platform == 'darwin' or
             (sys.platform == 'win32' and sys.getwindowsversion()[0] >= 6))
 
